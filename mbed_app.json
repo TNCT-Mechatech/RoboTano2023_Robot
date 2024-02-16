@@ -1,0 +1,14 @@
+{
+  "config": {
+    "serialbridge_with_canfd": {
+      "help": "Macro",
+      "macro_name": "SB_CANFD",
+      "value": 0
+    },
+     "serialbridge_for_mbed": {
+      "help": "Macro",
+      "macro_name": "MBED",
+      "value": 0
+    }
+  }
+}
