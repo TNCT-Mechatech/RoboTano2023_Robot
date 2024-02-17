@@ -5,8 +5,9 @@
 #include "cstdio"
 #include "mbed.h"
 #include "wheel.hpp"
+#include "math.h"
 
-#include "Controller.hpp"
+#include "Control.hpp"
 #include <MbedHardwareSerial.hpp>
 #include <SerialBridge.hpp>
 
@@ -34,8 +35,9 @@
 
 #define PI 3.1415
 
-SerialDev *dev = new MbedHardwareSerial(new BufferedSerial(USBTX, USBRX, 9600));
-SerialBridge serial(dev);
+SerialDev *dev =
+    new MbedHardwareSerial(new BufferedSerial(SERIAL_TX, SERIAL_RX, 115200));
+SerialBridge serial(dev, 1024);
 
 SPI spi(HINATA_MOSI, HINATA_MISO, HINATA_SCLK);
 DigitalOut SLED(HINATA_LED);
@@ -50,6 +52,7 @@ DigitalOut led1(LED1), led2(LED2), led3(LED3);
 Timer timer;
 
 uint32_t getMillisecond() {
+
   return (uint32_t)duration_cast<std::chrono::milliseconds>(
              timer.elapsed_time())
       .count();
@@ -70,7 +73,7 @@ Wheel wheel1(0.396, PI * 0.138, PI / 2, PI / 4),
     wheel4(0.396, PI * 1.862, PI / 2, PI * 7 / 4);
 
 int main() {
-    float joystick_x_raw, joystick_yraw, joystick_turn_raw;
+  float joystick_x_raw, joystick_yraw, joystick_turn_raw;
   float joystick_x, joystick_y, joystick_turn;
   float moter_speed_raw;
   float moter_speed;
@@ -84,13 +87,13 @@ int main() {
   timer.start();
 
   //  set up
-  ACAN2517FDSettings settings(ACAN2517FDSettings::OSC_4MHz, 500UL * 1000UL,
-                              DataBitRateFactor::x2);
+  ACAN2517FDSettings settings(ACAN2517FDSettings::OSC_4MHz, 125UL * 1000UL,
+                              DataBitRateFactor::x8);
 
   settings.mRequestedMode = ACAN2517FDSettings::NormalFD;
 
-  settings.mDriverTransmitFIFOSize = 4;
-  settings.mDriverReceiveFIFOSize = 3;
+  settings.mDriverTransmitFIFOSize = 10;
+  settings.mDriverReceiveFIFOSize = 5;
 
   const uint32_t errorCode0 = dev_can.begin(settings);
   if (errorCode0 == 0) {
@@ -100,7 +103,8 @@ int main() {
   }
 
   setting_struct_t mdc_setting = {
-      OperatorMode::MD_OPERATOR, EncoderType::VELOCITY,
+      OperatorMode::MD_OPERATOR,
+      EncoderType::VELOCITY,
       //  分解能
       1,
       //  反転するか(回転方向が合わない場合にトグルしてください。)
@@ -120,18 +124,38 @@ int main() {
   };
 
   //  0番目(回路側では1番)のモータ動作を設定します。
+  wait_us(200 * 1000);
   mdc_client0.update_setting(0, mdc_setting);
+  wait_us(200 * 1000);
   mdc_client0.update_setting(1, mdc_setting);
+  wait_us(200 * 1000);
   mdc_client0.update_setting(2, mdc_setting);
+  wait_us(200 * 1000);
   mdc_client0.update_setting(3, mdc_setting);
+  wait_us(200 * 1000);
+
+  mdc_client1.update_setting(0, mdc_setting);
+  wait_us(200 * 1000);
+  mdc_client1.update_setting(1, mdc_setting);
+  wait_us(200 * 1000);
+  mdc_client1.update_setting(2, mdc_setting);
+  wait_us(200 * 1000);
+  mdc_client1.update_setting(3, mdc_setting);
+  wait_us(200 * 1000);
+
   while (true) {
     //  update and read
 
-    mdc_client1.update_setting(0, mdc_setting);
-    mdc_client1.update_setting(1, mdc_setting);
-    mdc_client1.update_setting(2, mdc_setting);
-    mdc_client1.update_setting(3, mdc_setting);
+    dev_can.poll();
     serial.update();
+
+    if (mdc_client0.update()) {
+      led1 = !led1;
+    }
+
+    if (mdc_client1.update()) {
+      led2 = !led2;
+    }
 
     if (msg.was_updated()) {
 
@@ -149,7 +173,17 @@ int main() {
       arm_down = msg.data.arm_down;
       hand_status = msg.data.hand_status;
 
-      printf("%d\n\r", msg.data.joystick_x);
+      //   printf("joystick.x：%d\n\r", msg.data.joystick_x);
+      //   printf("joystick.y：%d\n\r", msg.data.joystick_y);
+      //   printf("joystick.z：%d\n\r", msg.data.joystick_turn);
+      printf("moter.speed：%d", msg.data.moter_speed);
+      printf("roller.status：%s\n\r",
+             msg.data.roller_status ? "true" : "false");
+      //   printf("shoot.bottom：%s\n\r", msg.data.shoot_bottom ? "true" :
+      //   "false"); printf("arm.up：%s\n\r", msg.data.arm_up ? "true" :
+      //   "false"); printf("arm.down：%s\n\r", msg.data.arm_down ? "true" :
+      //   "false"); printf("hand.status：%s\n\r", msg.data.hand_status ? "true"
+      //   : "false");
 
       mdc_client0.set_target(
           0, wheel1.get_velocity(joystick_x, joystick_y, joystick_turn));
@@ -178,14 +212,16 @@ int main() {
       else
         mdc_client1.set_target(3, 0);
 
+      mdc_client1.send_target();
+    
+
       if (hand_status == true)
         Air = 1;
       else
         Air = 0;
     }
 
-    dev_can.poll();
     can_serial.update();
-    wait_us(100000);
+    wait_us(70 * 1000);
   }
 }
